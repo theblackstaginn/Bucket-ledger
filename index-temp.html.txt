@@ -1,0 +1,715 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bucket Ledger</title>
+  <style>
+    :root { --bg:#0b0c10; --card:#141824; --muted:#9aa3b2; --text:#e7e9ee; --ok:#45d483; --bad:#ff5d5d; --warn:#ffcc66; --line:#273046; --accent:#2a3cff;}
+    body { margin:0; font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial; background:var(--bg); color:var(--text); }
+    header { padding:18px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:rgba(11,12,16,.92); backdrop-filter: blur(10px); z-index:10;}
+    h1 { margin:0; font-size:18px; letter-spacing:.4px; }
+    .sub { color:var(--muted); font-size:12px; margin-top:4px; }
+    main { padding:16px; max-width:980px; margin:0 auto; }
+    .grid { display:grid; grid-template-columns: 1fr; gap:12px; }
+    @media (min-width: 980px){ .grid { grid-template-columns: 1.2fr .8fr; } }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    label { font-size:12px; color:var(--muted); display:block; margin-bottom:6px; }
+    input, select, button, textarea {
+      width:100%; box-sizing:border-box; border-radius:12px; border:1px solid var(--line);
+      background:#0f1320; color:var(--text); padding:10px 12px; font-size:14px;
+    }
+    textarea { min-height:68px; resize:vertical; }
+    button { cursor:pointer; background:#1a2140; }
+    button.primary { background:var(--accent); border-color:var(--accent); }
+    button.danger { background:#3a1720; border-color:#5a2232; color:#ffd7df; }
+    .pill { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid var(--line); background:#0f1320; }
+    .kpi { display:flex; justify-content:space-between; align-items:baseline; gap:10px; padding:10px 0; border-bottom:1px dashed var(--line); }
+    .kpi:last-child{ border-bottom:none; }
+    .kpi .name { color:var(--muted); font-size:12px; }
+    .kpi .val { font-size:16px; font-weight:700; }
+    .tag { font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+    .ok { color:var(--ok); }
+    .bad { color:var(--bad); }
+    .warn { color:var(--warn); }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { padding:10px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-weight:600; }
+    .right { text-align:right; }
+    .small { font-size:12px; color:var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .split { display:grid; grid-template-columns: 1fr; gap:10px; }
+    @media (min-width: 560px){ .split{ grid-template-columns: 1fr 1fr; } }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+    .tab { padding:8px 10px; border-radius:999px; border:1px solid var(--line); background:#0f1320; color:var(--muted); cursor:pointer; user-select:none; }
+    .tab.active { border-color:var(--accent); color:var(--text); }
+    .hidden { display:none; }
+    hr { border:none; border-top:1px solid var(--line); margin:12px 0; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Bucket Ledger</h1>
+  <div class="sub">Local-only tracker. No accounts, no cloud. Buckets + paychecks + allocations.</div>
+</header>
+
+<main class="grid">
+  <section class="card">
+    <div class="row" style="justify-content:space-between;">
+      <div>
+        <div class="tag">Buckets + Rules</div>
+        <div class="small">Define buckets. Then log transactions or allocate paychecks.</div>
+      </div>
+      <div class="row" style="gap:8px;">
+        <button id="exportBtn">Export JSON</button>
+        <button class="danger" id="wipeBtn">Wipe</button>
+      </div>
+    </div>
+
+    <hr />
+
+    <div class="split">
+      <div>
+        <label>Bucket name</label>
+        <input id="bName" placeholder="e.g., Cash App (Jeep Escrow)" />
+      </div>
+      <div>
+        <label>Type</label>
+        <select id="bType">
+          <option value="transit">Transit / Escrow</option>
+          <option value="buffer">Cash Buffer</option>
+          <option value="growth">Investing / Growth</option>
+          <option value="spend">Controlled Spend</option>
+          <option value="bills">Bills Spine</option>
+        </select>
+      </div>
+      <div>
+        <label>Target (optional)</label>
+        <input id="bTarget" type="number" step="0.01" placeholder="e.g., 1000" />
+      </div>
+      <div>
+        <label>Rule (one sentence)</label>
+        <input id="bRule" placeholder="e.g., IN: Donna payments. OUT: Jeep payment only." />
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <button class="primary" id="addBucketBtn">Add / Update Bucket</button>
+      <button id="seedBtn">Seed with our current setup</button>
+    </div>
+
+    <div style="margin-top:12px;">
+      <table id="bucketTable">
+        <thead>
+          <tr>
+            <th>Bucket</th>
+            <th>Type</th>
+            <th class="right">Balance</th>
+            <th class="right">Target</th>
+            <th>Rule</th>
+            <th class="right">Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="small" style="margin-top:8px;">Rule: each bucket gets one job. Mixed offerings create chaos.</div>
+    </div>
+  </section>
+
+  <aside class="card">
+    <div class="tabs">
+      <div class="tab active" data-tab="dash">Dashboard</div>
+      <div class="tab" data-tab="tx">Bucket Tx</div>
+      <div class="tab" data-tab="pay">Paychecks</div>
+    </div>
+
+    <!-- DASH -->
+    <div id="tab-dash">
+      <div class="tag">Dashboard</div>
+      <div id="kpis" style="margin-top:8px;"></div>
+
+      <hr />
+
+      <div class="tag">Recent activity</div>
+      <div style="margin-top:10px; max-height:260px; overflow:auto;">
+        <table id="activityTable">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Who/Bucket</th>
+              <th>Note</th>
+              <th class="right">Δ</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TX -->
+    <div id="tab-tx" class="hidden">
+      <div class="tag">Log a bucket transaction</div>
+
+      <div class="split" style="margin-top:10px;">
+        <div>
+          <label>Bucket</label>
+          <select id="tBucket"></select>
+        </div>
+        <div>
+          <label>Direction</label>
+          <select id="tDir">
+            <option value="in">Deposit (IN)</option>
+            <option value="out">Withdrawal (OUT)</option>
+          </select>
+        </div>
+        <div>
+          <label>Amount</label>
+          <input id="tAmt" type="number" step="0.01" placeholder="e.g., 150" />
+        </div>
+        <div>
+          <label>Date</label>
+          <input id="tDate" type="date" />
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <label>Note</label>
+        <input id="tNote" placeholder="e.g., Donna payment / Jeep payment / Acorns weekly" />
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="primary" id="logBtn">Log</button>
+        <button id="clearTxBtn">Clear</button>
+      </div>
+
+      <hr />
+
+      <div class="tag">Recent bucket transactions</div>
+      <div style="margin-top:10px; max-height:260px; overflow:auto;">
+        <table id="txTable">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Bucket</th>
+              <th>Note</th>
+              <th class="right">Δ</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PAYCHECKS -->
+    <div id="tab-pay" class="hidden">
+      <div class="tag">Log a paycheck</div>
+
+      <div class="split" style="margin-top:10px;">
+        <div>
+          <label>Who</label>
+          <select id="pWho">
+            <option value="Randall">Randall</option>
+            <option value="Jess">Jess</option>
+          </select>
+        </div>
+        <div>
+          <label>Amount</label>
+          <input id="pAmt" type="number" step="0.01" placeholder="e.g., 1200" />
+        </div>
+        <div>
+          <label>Date</label>
+          <input id="pDate" type="date" />
+        </div>
+        <div>
+          <label>Note</label>
+          <input id="pNote" placeholder="e.g., paycheck / bonus / tips" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <button class="primary" id="payLogBtn">Log Paycheck</button>
+        <button id="payClearBtn">Clear</button>
+      </div>
+
+      <hr />
+
+      <div class="tag">Allocate a paycheck to a bucket</div>
+      <div class="small" style="margin-top:6px;">This creates a bucket “IN” transaction and marks the paycheck as allocated.</div>
+
+      <div class="split" style="margin-top:10px;">
+        <div>
+          <label>Select paycheck</label>
+          <select id="allocPay"></select>
+        </div>
+        <div>
+          <label>Send to bucket</label>
+          <select id="allocBucket"></select>
+        </div>
+        <div>
+          <label>Amount to allocate</label>
+          <input id="allocAmt" type="number" step="0.01" placeholder="e.g., 500" />
+        </div>
+        <div>
+          <label>Date (defaults to paycheck date)</label>
+          <input id="allocDate" type="date" />
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <label>Note</label>
+        <input id="allocNote" placeholder="e.g., Bills spine funding" />
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="primary" id="allocBtn">Allocate</button>
+      </div>
+
+      <hr />
+
+      <div class="tag">Recent paychecks</div>
+      <div style="margin-top:10px; max-height:260px; overflow:auto;">
+        <table id="payTable">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Who</th>
+              <th>Note</th>
+              <th class="right">Amount</th>
+              <th class="right">Allocated</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+    </div>
+  </aside>
+</main>
+
+<script>
+(function(){
+  const KEY = "bucket_ledger_v2";
+  const $ = (id)=>document.getElementById(id);
+
+  const state = load() ?? { buckets: [], tx: [], pay: [] };
+
+  function load(){
+    try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; }
+  }
+  function save(){
+    localStorage.setItem(KEY, JSON.stringify(state));
+    renderAll();
+  }
+
+  function money(n){
+    const x = Number(n || 0);
+    return x.toLocaleString(undefined, { style:"currency", currency:"USD" });
+  }
+
+  function todayISO(){
+    const d = new Date();
+    const tzOff = d.getTimezoneOffset() * 60000;
+    return new Date(d - tzOff).toISOString().slice(0,10);
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+  }
+
+  function getBucket(id){ return state.buckets.find(b => b.id === id); }
+  function getPay(id){ return state.pay.find(p => p.id === id); }
+
+  function calcBalance(bid){
+    let bal = 0;
+    for (const t of state.tx){
+      if (t.bucketId !== bid) continue;
+      bal += (t.dir === "in" ? 1 : -1) * Number(t.amount);
+    }
+    return bal;
+  }
+
+  function upsertBucket(b){
+    const idx = state.buckets.findIndex(x => x.id === b.id);
+    if (idx >= 0) state.buckets[idx] = b;
+    else state.buckets.push(b);
+  }
+
+  function removeBucket(id){
+    state.buckets = state.buckets.filter(b => b.id !== id);
+  }
+
+  // Tabs
+  document.querySelectorAll(".tab").forEach(t=>{
+    t.addEventListener("click", ()=>{
+      document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+      t.classList.add("active");
+      const tab = t.dataset.tab;
+      ["dash","tx","pay"].forEach(k=>{
+        $("tab-"+k).classList.toggle("hidden", k !== tab);
+      });
+    });
+  });
+
+  // Render buckets
+  function renderBuckets(){
+    const tbody = $("bucketTable").querySelector("tbody");
+    tbody.innerHTML = "";
+    for (const b of state.buckets){
+      const bal = calcBalance(b.id);
+      const status = (b.target && Number(b.target) > 0)
+        ? (bal >= Number(b.target) ? "ok" : (bal >= 0.5*Number(b.target) ? "warn" : "bad"))
+        : "small";
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><div style="font-weight:700;">${escapeHtml(b.name)}</div><div class="small mono">${b.id}</div></td>
+        <td><span class="tag">${escapeHtml(b.type)}</span></td>
+        <td class="right ${status}">${money(bal)}</td>
+        <td class="right">${b.target ? money(b.target) : "<span class='small'>—</span>"}</td>
+        <td>${b.rule ? `<span class="small">${escapeHtml(b.rule)}</span>` : "<span class='small'>—</span>"}</td>
+        <td class="right">
+          <button data-edit="${b.id}">Edit</button>
+          <button class="danger" data-del="${b.id}">Del</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    tbody.querySelectorAll("button[data-edit]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const b = getBucket(btn.dataset.edit);
+        if (!b) return;
+        $("bName").value = b.name;
+        $("bType").value = b.type;
+        $("bTarget").value = b.target ?? "";
+        $("bRule").value = b.rule ?? "";
+        $("bName").dataset.editId = b.id;
+      });
+    });
+
+    tbody.querySelectorAll("button[data-del]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const id = btn.dataset.del;
+        if (!confirm("Delete this bucket? (Transactions remain in history.)")) return;
+        removeBucket(id);
+        save();
+      });
+    });
+  }
+
+  function renderSelects(){
+    const sel = $("tBucket");
+    const sel2 = $("allocBucket");
+    sel.innerHTML = "";
+    sel2.innerHTML = "";
+    for (const b of state.buckets){
+      const opt = document.createElement("option");
+      opt.value = b.id;
+      opt.textContent = b.name;
+      sel.appendChild(opt);
+
+      const opt2 = document.createElement("option");
+      opt2.value = b.id;
+      opt2.textContent = b.name;
+      sel2.appendChild(opt2);
+    }
+  }
+
+  function renderTxTables(){
+    const tbody = $("txTable").querySelector("tbody");
+    tbody.innerHTML = "";
+    const recent = [...state.tx].sort((a,b)=> (b.date||"").localeCompare(a.date||"")).slice(0, 30);
+
+    for (const t of recent){
+      const b = getBucket(t.bucketId);
+      const name = b ? b.name : "Orphaned bucket";
+      const delta = (t.dir === "in" ? 1 : -1) * Number(t.amount);
+      const cls = delta >= 0 ? "ok" : "bad";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(t.date || "")}</td>
+        <td>${escapeHtml(name)}</td>
+        <td><span class="small">${escapeHtml(t.note || "")}</span></td>
+        <td class="right ${cls}">${money(delta)}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  // Paychecks
+  function renderPay(){
+    const tbody = $("payTable").querySelector("tbody");
+    tbody.innerHTML = "";
+    const recent = [...state.pay].sort((a,b)=> (b.date||"").localeCompare(a.date||"")).slice(0, 30);
+
+    for (const p of recent){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(p.date || "")}</td>
+        <td>${escapeHtml(p.who || "")}</td>
+        <td><span class="small">${escapeHtml(p.note || "")}</span></td>
+        <td class="right">${money(p.amount)}</td>
+        <td class="right">${money(p.allocated || 0)}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    // Allocation dropdown
+    const sel = $("allocPay");
+    sel.innerHTML = "";
+    const unfilled = state.pay
+      .map(p => ({...p, remaining: Number(p.amount) - Number(p.allocated||0)}))
+      .filter(p => p.remaining > 0.009)
+      .sort((a,b)=> (b.date||"").localeCompare(a.date||""));
+
+    for (const p of unfilled){
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = `${p.date} • ${p.who} • remaining ${money(p.remaining)}`;
+      sel.appendChild(opt);
+    }
+
+    if (unfilled.length === 0){
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "No unallocated paychecks";
+      sel.appendChild(opt);
+    }
+  }
+
+  // KPIs (include income)
+  function sumIncome(days){
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    return state.pay.reduce((s,p)=>{
+      const d = p.date ? new Date(p.date+"T00:00:00") : null;
+      if (!d || d < cutoff) return s;
+      return s + Number(p.amount||0);
+    }, 0);
+  }
+
+  function renderKPIs(){
+    const k = $("kpis");
+    const totals = { transit:0, buffer:0, growth:0, spend:0, bills:0, all:0 };
+    for (const b of state.buckets){
+      const bal = calcBalance(b.id);
+      totals[b.type] = (totals[b.type] ?? 0) + bal;
+      totals.all += bal;
+    }
+
+    const bufferTarget = state.buckets
+      .filter(b=>b.type==="buffer" && b.target)
+      .reduce((s,b)=> s + Number(b.target||0), 0);
+
+    const bufferBal = state.buckets
+      .filter(b=>b.type==="buffer")
+      .reduce((s,b)=> s + calcBalance(b.id), 0);
+
+    const bufferPct = bufferTarget > 0 ? Math.min(100, Math.round((bufferBal/bufferTarget)*100)) : null;
+
+    const inc30 = sumIncome(30);
+
+    k.innerHTML = `
+      <div class="kpi"><div class="name">Income (last 30 days)</div><div class="val">${money(inc30)}</div></div>
+      <div class="kpi"><div class="name">Total across buckets</div><div class="val">${money(totals.all)}</div></div>
+      <div class="kpi"><div class="name">Growth (investing)</div><div class="val">${money(totals.growth)}</div></div>
+      <div class="kpi"><div class="name">Cash buffers</div><div class="val">${money(totals.buffer)}</div></div>
+      <div class="kpi"><div class="name">Transit / escrow</div><div class="val">${money(totals.transit)}</div></div>
+      <div class="kpi"><div class="name">Controlled spend</div><div class="val">${money(totals.spend)}</div></div>
+      <div class="kpi"><div class="name">Buffer progress</div>
+        <div class="val">${bufferPct === null ? "<span class='small'>Set a target</span>" : `<span class='${bufferPct>=100?"ok":bufferPct>=50?"warn":"bad"}'>${bufferPct}%</span>`}</div>
+      </div>
+      <div class="small" style="margin-top:8px;">
+        Saturn rule: measure the river (income), then direct it. Buckets come second.
+      </div>
+    `;
+  }
+
+  // Unified activity (pay + tx)
+  function renderActivity(){
+    const tbody = $("activityTable").querySelector("tbody");
+    tbody.innerHTML = "";
+
+    const items = [];
+
+    for (const p of state.pay){
+      items.push({
+        date: p.date || "",
+        kind: "Paycheck",
+        who: p.who || "",
+        note: p.note || "",
+        delta: Number(p.amount || 0)
+      });
+    }
+
+    for (const t of state.tx){
+      const b = getBucket(t.bucketId);
+      const name = b ? b.name : "Orphaned bucket";
+      const delta = (t.dir === "in" ? 1 : -1) * Number(t.amount || 0);
+      items.push({
+        date: t.date || "",
+        kind: "Bucket Tx",
+        who: name,
+        note: t.note || "",
+        delta
+      });
+    }
+
+    items.sort((a,b)=> (b.date||"").localeCompare(a.date||""));
+    for (const it of items.slice(0, 30)){
+      const cls = it.delta >= 0 ? "ok" : "bad";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(it.date)}</td>
+        <td><span class="tag">${escapeHtml(it.kind)}</span></td>
+        <td>${escapeHtml(it.who)}</td>
+        <td><span class="small">${escapeHtml(it.note)}</span></td>
+        <td class="right ${cls}">${money(it.delta)}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  // Bucket actions
+  $("addBucketBtn").addEventListener("click", ()=>{
+    const name = $("bName").value.trim();
+    if (!name) return alert("Bucket name required.");
+    const type = $("bType").value;
+    const target = $("bTarget").value ? Number($("bTarget").value) : null;
+    const rule = $("bRule").value.trim();
+
+    const existingId = $("bName").dataset.editId || null;
+    const id = existingId || ("b_" + Math.random().toString(16).slice(2,10));
+
+    upsertBucket({ id, name, type, target, rule });
+    $("bName").value = ""; $("bTarget").value = ""; $("bRule").value = "";
+    delete $("bName").dataset.editId;
+    save();
+  });
+
+  $("seedBtn").addEventListener("click", ()=>{
+    if (!confirm("Seed with your current setup? (Does not delete existing.)")) return;
+    const seeds = [
+      { name:"Bank (Bills Spine)", type:"bills", target:null, rule:"Fixed bills + minimums. Autopay everything." },
+      { name:"Cash App (Jeep Escrow)", type:"transit", target:null, rule:"IN: Donna payments. OUT: Jeep payment only. No spending." },
+      { name:"Betterment Cash Reserve", type:"buffer", target:1000, rule:"Emergency buffer. Build to $1,000 first." },
+      { name:"Betterment Auto-Invest", type:"growth", target:null, rule:"Long-term growth. Never borrow from it." },
+      { name:"Acorns", type:"growth", target:null, rule:"$30/week engine. No card spending. Reassess at $2–3k." },
+      { name:"Smart Spend (Jess)", type:"spend", target:null, rule:"Pressure valve. When empty, stop." }
+    ];
+    for (const s of seeds){
+      upsertBucket({ id:"b_" + Math.random().toString(16).slice(2,10), ...s });
+    }
+    save();
+  });
+
+  // Log bucket tx
+  $("logBtn").addEventListener("click", ()=>{
+    const bucketId = $("tBucket").value;
+    if (!bucketId) return alert("Create a bucket first.");
+    const dir = $("tDir").value;
+    const amount = Number($("tAmt").value);
+    if (!amount || amount <= 0) return alert("Enter a positive amount.");
+    const date = $("tDate").value || todayISO();
+    const note = $("tNote").value.trim();
+
+    state.tx.push({ bucketId, dir, amount, date, note });
+    $("tAmt").value = ""; $("tNote").value = "";
+    save();
+  });
+
+  $("clearTxBtn").addEventListener("click", ()=>{
+    $("tAmt").value = ""; $("tNote").value = ""; $("tDir").value = "in"; $("tDate").value = todayISO();
+  });
+
+  // Log paycheck
+  $("payLogBtn").addEventListener("click", ()=>{
+    const who = $("pWho").value;
+    const amount = Number($("pAmt").value);
+    if (!amount || amount <= 0) return alert("Enter a positive paycheck amount.");
+    const date = $("pDate").value || todayISO();
+    const note = $("pNote").value.trim();
+
+    state.pay.push({
+      id: "p_" + Math.random().toString(16).slice(2,10),
+      who, amount, date, note,
+      allocated: 0
+    });
+
+    $("pAmt").value = ""; $("pNote").value = "";
+    save();
+  });
+
+  $("payClearBtn").addEventListener("click", ()=>{
+    $("pWho").value = "Randall";
+    $("pAmt").value = "";
+    $("pNote").value = "";
+    $("pDate").value = todayISO();
+  });
+
+  // Allocate paycheck -> bucket (creates bucket IN tx)
+  $("allocBtn").addEventListener("click", ()=>{
+    const payId = $("allocPay").value;
+    if (!payId) return alert("No unallocated paycheck selected.");
+    const p = getPay(payId);
+    if (!p) return alert("Paycheck not found.");
+
+    const bucketId = $("allocBucket").value;
+    if (!bucketId) return alert("Select a bucket.");
+
+    const remaining = Number(p.amount) - Number(p.allocated||0);
+    const amt = Number($("allocAmt").value);
+    if (!amt || amt <= 0) return alert("Enter a positive allocation amount.");
+    if (amt > remaining + 0.009) return alert(`That exceeds remaining paycheck amount (${money(remaining)}).`);
+
+    const date = $("allocDate").value || p.date || todayISO();
+    const note = $("allocNote").value.trim() || `Allocation from ${p.who} paycheck`;
+
+    // Bucket IN tx
+    state.tx.push({ bucketId, dir:"in", amount: amt, date, note: note });
+
+    // Mark allocated
+    p.allocated = Number(p.allocated||0) + amt;
+
+    $("allocAmt").value = "";
+    $("allocNote").value = "";
+    save();
+  });
+
+  // Export / wipe
+  $("exportBtn").addEventListener("click", ()=>{
+    const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "bucket-ledger-export.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  $("wipeBtn").addEventListener("click", ()=>{
+    if (!confirm("Wipe ALL buckets + transactions + paychecks on this device?")) return;
+    localStorage.removeItem(KEY);
+    location.reload();
+  });
+
+  function renderAll(){
+    renderBuckets();
+    renderSelects();
+    renderTxTables();
+    renderPay();
+    renderKPIs();
+    renderActivity();
+
+    // default dates
+    $("tDate").value = $("tDate").value || todayISO();
+    $("pDate").value = $("pDate").value || todayISO();
+    $("allocDate").value = $("allocDate").value || "";
+  }
+
+  renderAll();
+})();
+</script>
+</body>
+</html>
